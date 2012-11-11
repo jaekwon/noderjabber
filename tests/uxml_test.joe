@@ -1,0 +1,5 @@
+uxml = require '../lib/uxml'
+
+test = (str) ->
+  stream = 
+

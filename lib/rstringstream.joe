@@ -1,0 +1,95 @@
+EventEmitter = require('events').EventEmitter
+
+STATE_LIVE = 0
+STATE_PAUSED = 1
+STATE_DEAD = 2
+
+# A configurable "Readable Stream" for testing.
+# You can set the amount of bytes to emit at a time.
+#   text:   string to emit in chunks.
+#   chunk:  size to emit at a time.
+#   wait:   ms to wait between each emit.
+makeReadableStream = (text, chunk=1024, wait=0) ->
+
+  rs = {}
+  _ee = new EventEmitter()
+  rs.emit = _ee.emit
+  rs.on = _ee.on
+  _text = text
+  _encoding = undefined
+  _state = STATE_LIVE
+  _timer = undefined
+
+  _emitMore = ->
+    # If there is text, emit and reschedule
+    if _text.length > 0
+      more = _text[...chunk]
+      if _encoding?
+        rs.emit('data', new Buffer(more).toString(_encoding))
+      else
+        rs.emit('data', new Buffer(more))
+      _text = _text[chunk...]
+      _timer = setTimeout _emitMore, wait
+    # Otherwise, emit end
+    else
+      rs.emit('end')
+      _state = STATE_DEAD
+
+  Object.defineProperty rs, 'readable', get: -> _state isnt STATE_DEAD
+
+  rs.setEncoding = (encoding) -> _encoding = encoding
+
+  rs.pause = ->
+    if _state is STATE_LIVE
+      clearTimeout _timer
+      _state = STATE_PAUSED
+
+  rs.resume = ->
+    if _state is STATE_PAUSED
+      _timer = setTimeout _emitMore, wait
+      _state is STATE_LIVE
+
+  rs.destroy  = -> throw new Error "ReadableStream.destroy not implemented yet"
+
+  rs.pipe     = -> throw new Error "ReadableStream.pipe not implemented yet"
+
+  # Schedule stream to begin emitting after wait.
+  setTimeout _emitMore, wait
+
+  return rs
+
+# test it
+if not module.parent
+
+  async = require('async')
+
+  async.series [
+    (next) ->
+      console.log "__ regular test __"
+      rs = makeReadableStream "this is a looong string", 2, 30
+      rs.setEncoding 'utf8'
+      rs.on 'data', (data) ->
+        console.log {data}
+      rs.on 'end', ->
+        console.log {end:yes}
+        next()
+
+    (next) ->
+      console.log "__ pause test __"
+      rs = makeReadableStream "this is a looong string", 2, 30
+      rs.setEncoding 'utf8'
+      rs.on 'data', (data) ->
+        console.log {data}
+      rs.on 'end', ->
+        console.log {end:yes}
+        next()
+      # pause it in a bit
+      setTimeout (->
+        rs.pause()
+        console.log "paused..."
+      ), 200
+      setTimeout (->
+        rs.resume()
+        console.log "resumed..."
+      ), 1000
+  ]

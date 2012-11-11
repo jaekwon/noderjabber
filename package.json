@@ -1,0 +1,14 @@
+{
+  "name": "noderjabber",
+  "description": "xmpp system on node",
+  "version": "0.0.0",
+  "author": "Jae Kwon <jkwon.work@gmail.com>",
+  "repository": {"type": "git", "url": "git://github.com/jaekwon/NoderJabber.git"},
+  "dependencies": {
+      "async": ""
+  },
+  "keywords": [],
+  "engines": {"node": ">= 0.8.2"},
+  "contributors": [
+  ]
+}
