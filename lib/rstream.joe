@@ -9,7 +9,7 @@ STATE_DEAD = 2
 #   text:   string to emit in chunks.
 #   chunk:  size to emit at a time.
 #   wait:   ms to wait between each emit.
-makeReadableStream = (text, chunk=1024, wait=0) ->
+@makeRStream = makeRStream = (text, chunk=1024, wait=0) ->
 
   rs = {}
   _ee = new EventEmitter()
@@ -66,7 +66,7 @@ if not module.parent
   async.series [
     (next) ->
       console.log "__ regular test __"
-      rs = makeReadableStream "this is a looong string", 2, 30
+      rs = makeRStream "this is a looong string", 2, 30
       rs.setEncoding 'utf8'
       rs.on 'data', (data) ->
         console.log {data}
@@ -76,7 +76,7 @@ if not module.parent
 
     (next) ->
       console.log "__ pause test __"
-      rs = makeReadableStream "this is a looong string", 2, 30
+      rs = makeRStream "this is a looong string", 2, 30
       rs.setEncoding 'utf8'
       rs.on 'data', (data) ->
         console.log {data}

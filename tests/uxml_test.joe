@@ -1,5 +1,11 @@
 uxml = require '../lib/uxml'
+rstream = require '../lib/rstream'
 
 test = (str) ->
-  stream = 
+  stream = rstream.makeRStream str, 10, 30
+  uxml.parseStream stream, {
+    emit: (event, args...) ->
+      console.log event, args
+  }
 
+test '<document foo="bar"></document>'

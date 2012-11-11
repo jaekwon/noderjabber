@@ -1,7 +1,8 @@
 # uxml (micro-xml) parses xml in an evented way, much like a SAX parser.
 
 STATE_START = 0 # expect opentag ('<') or text
-STATE_ATTRS = 1 # expect key="value" pairs or closetag ('>')
+STATE_TNAME = 1 # expect tag name followed by space or closetag.
+STATE_ATTRS = 2 # expect key="value" pairs or closetag ('>')
 
 ATTR_RE = /^\s*(.+)\s*=\s*('(?:[^']*)'|"(?:[^"]*)")/
 
@@ -10,8 +11,7 @@ ATTR_RE = /^\s*(.+)\s*=\s*('(?:[^']*)'|"(?:[^"]*)")/
 # May throw an error synchronously. Watch out.
 @parseStream = (stream, handler) ->
 
-  throw new Error("Parse handler requires 'end' handler") if not handler?.end?
-  throw new Error("Parse handler requires 'error' handler") if not handler?.error?
+  throw new Error("Parse handler requires 'emit' method") if not handler?.emit?
   throw new Error("Stream should exist and be readable") if not stream? or not stream.readable
 
   _state  = STATE_START
@@ -24,7 +24,7 @@ ATTR_RE = /^\s*(.+)\s*=\s*('(?:[^']*)'|"(?:[^"]*)")/
   # When data is received, parse it.
   stream.on 'data', (data) ->
 
-    throw new Error("Stream data should have been a unicode string")
+    throw new Error("Stream data should have been a unicode string") unless typeof data is 'string'
 
     _buffer += data
 
@@ -34,15 +34,19 @@ ATTR_RE = /^\s*(.+)\s*=\s*('(?:[^']*)'|"(?:[^"]*)")/
         when STATE_START
           if ltPos=_buffer.search('<') is -1
             return
-          else
-            handler.on('text', _buffer[...ltPos])
+          else if ltPos > 0
+            handler.emit('text', _buffer[...ltPos])
             _buffer = _buffer[ltPos+1...]
             _state  = STATE_ATTRS
+            continue
+          else
+            _buffer = _buffer[1...]
+            _state = STATE_ATTRS
             continue
         when STATE_ATTRS
           while res=_parseAttribute(_buffer, _attrs) isnt undefined
             _buffer = res
-          if gtMatch=_buffer.match(/^\s*>/) isnt -1
+          if gtMatch=_buffer.match(/^\s*>/)
             _buffer = _buffer[gtMatch[0].length...]
             _state  = STATE_START
             continue
@@ -50,8 +54,8 @@ ATTR_RE = /^\s*(.+)\s*=\s*('(?:[^']*)'|"(?:[^"]*)")/
             return
 
   # When stream ends or errors, pass the event along
-  stream.on 'end', handler.end
-  stream.on 'error', handler.error
+  stream.on 'end', -> handler.emit('end')
+  stream.on 'error', (error) -> handler.emit('error', error)
 
 # Assuming that text is the beginning of an attribute (e.g. blahblah="somevalue")
 # Try to parse out an attribute and...
