@@ -1,0 +1,32 @@
+# Some methods pulled from https://github.com/oozcitak/xmlbuilder-js/blob/master/src/XMLFragment.coffee
+# Also, see http://www.w3.org/TR/2008/REC-xml-20081126/#NT-Name
+
+# Escapes special characters <, >, ', ", &
+#
+# `str` the string to escape
+@escapeXML = (str) ->
+  return str.replace(/&/g, '&amp;')
+            .replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/'/g, '&apos;').replace(/"/g, '&quot;')
+
+# Is an XML whitespace character
+WHITESPACE_CHARS = /[\u0020\u0009\u000D\u000A]/
+@isWS = isWS = (ch) ->
+  ch.match(WHITESPACE_CHARS)?
+
+# Checks whether the given string contains legal characters
+# Fails with an exception on error
+#
+# `str` the string to check
+ILLEGAL_CHARS = /[\u0000-\u0008\u000B-\u000C\u000E-\u001F\uD800-\uDFFF\uFFFE-\uFFFF]/
+@assertLegalChars = (str) ->
+  if chr=str.match(ILLEGAL_CHARS)
+    throw new Error "Invalid character (#{chr}) in string: #{str}"
+
+# Checks whether the given string is a legal attribute name
+ILLEGAL_NAME_CHARS = /[\u0000-\u0020\uD800-\uDFFF\uFFFE-\uFFFF]/
+@assertLegalName = (str) ->
+  if str.length is 0
+    throw new Error "Empty string is not a valid XML tag/attribute name"
+  if chr=str.match(ILLEGAL_NAME_CHARS)
+    throw new Error "Invalid XML tag/attribute name: #{str}"

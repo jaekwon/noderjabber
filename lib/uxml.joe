@@ -1,80 +1,207 @@
 # uxml (micro-xml) parses xml in an evented way, much like a SAX parser.
 
-STATE_START = 0 # expect opentag ('<') or text
-STATE_TNAME = 1 # expect tag name followed by space or closetag.
-STATE_ATTRS = 2 # expect key="value" pairs or closetag ('>')
+{clazz} = require 'cardamom'
+{colors:{red, blue}} = require 'cardamom'
+assert = require 'assert'
+{isWS, escapeXML, assertLegalChars, assertLegalName} = require './xmlhelpers'
 
-ATTR_RE = /^\s*(.+)\s*=\s*('(?:[^']*)'|"(?:[^"]*)")/
+Context = clazz ->
+
+  init: (@handler, @buffer='', @offset=0) ->
+    assert.ok @handler?.on, "Context must be given a handler, which needs an 'on' method."
+    @text         = undefined
+    @openTagName  = undefined
+    @closeTagName = undefined
+    @attrName     = undefined
+    @attrQuote    = undefined
+    @attrValue    = undefined
+    @ended = no
+    @tagName  = undefined
+    @tagStack = []
+    @tagAttrs = {}
+    @next = parseStart
+    
+  consume: (numChars) ->
+    assert.ok (@offset+numChars <= @buffer.length) or @ended
+    @offset += numChars
+
+  # Does some sanity check on events, and relays them to the handler.
+  emit: (event, arg1, arg2) ->
+    switch event
+      when 'OPEN_TAG'
+        assertLegalName arg1
+        @tagName = arg1
+        @tagStack.push arg1
+        @tagAttrs = {}
+      when 'ATTR'
+        arg1 = arg1.trim()
+        assertLegalName arg1
+        assertLegalChars arg2
+        name = arg1
+        value = escapeXML(arg2)
+        @tagAttrs[name] = value # TODO duplicates?
+      when 'OPEN_TAG_DONE'
+        @handler.on 'open', @tagName, @tagAttrs
+      when 'CLOSE_TAG'
+        currentTag = @tagStack.pop()
+        if arg1? and currentTag isnt arg1
+          @handler.on 'error', "Current tag is #{currentTag} but closed #{arg1}"
+        else
+          @handler.on 'close', currentTag
+      when 'TEXT'
+        assertLegalChars arg1
+        text = escapeXML(arg1)
+        @handler.on 'text', arg1
+
+  charsAvailable: ->
+    @buffer.length - @offset
+
+  appendChars: (chars) ->
+    @buffer = @buffer[@offset...] + chars
+    @offset = 0
+
+  endInput: ->
+    @ended = yes
+
+  toString: ->
+    """
+      Context
+        #{@buffer}
+        #{@offset}
+    """
+        
+
+# Start of a <tag...> or </tag> or text.
+# ch0 is the current character,
+# ch1 is the next, lookahead.
+parseStart = (ch0, ch1) ->
+  if ch0 is '<'
+    if ch1 is '/'
+      @consume 1
+      @closeTagName = ''
+      return parseCloseTagName
+    else
+      @openTagName = ''
+      return parseOpenTagName
+  else if ch1 is '<'
+    @emit 'TEXT', ch0
+    return parseStart
+  else
+    @text = ch0
+    return parseText
+parseStart._name = 'parseStart'
+
+parseText = (ch0, ch1) ->
+  @text += ch0
+  if ch1 is '<'
+    @emit 'TEXT', @text
+    return parseStart
+  else
+    return parseText
+parseText._name = 'parseText'
+
+parseCloseTagName = (ch0, ch1) ->
+  @closeTagName += ch0
+  if ch1 is '>'
+    @emit 'CLOSE_TAG', @closeTagName
+    @consume 1
+    return parseStart
+  else
+    return parseCloseTagName
+parseCloseTagName._name = 'parseCloseTagName'
+
+parseOpenTagName = (ch0, ch1) ->
+  if isWS ch0
+    if @openTagName
+      @emit 'OPEN_TAG', @openTagName
+      if ch1 is '>'
+        @emit 'OPEN_TAG_DONE'
+        @consume 1
+        return parseStart
+      else
+        @attrName = ''
+        return parseAttrName
+    else
+      return parseOpenTagName
+  else if ch0 is '>'
+    @emit 'OPEN_TAG', @openTagName
+    @emit 'OPEN_TAG_DONE'
+    return parseStart
+  else
+    @openTagName += ch0
+    return parseOpenTagName
+parseOpenTagName._name = 'parseOpenTagName'
+  
+parseAttrName = (ch0, ch1) ->
+  if ch0 is '/'
+    throw new Error "Expected > after /" unless ch1 is '>'
+    @emit 'OPEN_TAG_DONE'
+    @emit 'CLOSE_TAG'
+    @consume 1
+    return parseStart
+  @attrName += ch0
+  if ch1 is '='
+    @consume 1
+    @attrValue = ''
+    return parseAttrQuotedValue
+  else
+    return parseAttrName
+parseAttrName._name = 'parseAttrName'
+
+parseAttrQuotedValue = (ch0, ch1) ->
+  if isWS ch0
+    return parseAttrQuotedValue
+  else if ch0 is "'" or ch0 is '"'
+    @attrQuote = ch0
+    @attrValue = ''
+    return parseAttrValue
+  else
+    throw new Error "BLAH"
+parseAttrQuotedValue._name = 'parseAttrQuotedValue'
+  
+parseAttrValue = (ch0, ch1) ->
+  if ch0 is @attrQuote
+    @emit 'ATTR', @attrName, @attrValue
+    if ch1 is '>'
+      @emit 'OPEN_TAG_DONE'
+      @consume 1
+      return parseStart
+    else
+      @attrName = ''
+      return parseAttrName
+  else
+    @attrValue += ch0
+    return parseAttrValue
+parseAttrValue._name = 'parseAttrValue'
 
 # Given a node stream of data, consume bytes and callback on handler as elements are encountered.
 # Handler is an object of callback functions.
-# May throw an error synchronously. Watch out.
+# May throw an error synchronously.
 @parseStream = (stream, handler) ->
 
-  throw new Error("Parse handler requires 'emit' method") if not handler?.emit?
   throw new Error("Stream should exist and be readable") if not stream? or not stream.readable
 
-  _state  = STATE_START
-  _buffer = '' # whatever remains to be parsed
-  _attrs  = {} # accumulation of attributes
+  context = new Context(handler)
 
   # Streams should support utf8 only.
   stream.setEncoding('utf8')
 
   # When data is received, parse it.
   stream.on 'data', (data) ->
-
     throw new Error("Stream data should have been a unicode string") unless typeof data is 'string'
-
-    _buffer += data
-
-    # Parse as much as possible
-    loop
-      switch _state
-        when STATE_START
-          if ltPos=_buffer.search('<') is -1
-            return
-          else if ltPos > 0
-            handler.emit('text', _buffer[...ltPos])
-            _buffer = _buffer[ltPos+1...]
-            _state  = STATE_ATTRS
-            continue
-          else
-            _buffer = _buffer[1...]
-            _state = STATE_ATTRS
-            continue
-        when STATE_ATTRS
-          while res=_parseAttribute(_buffer, _attrs) isnt undefined
-            _buffer = res
-          if gtMatch=_buffer.match(/^\s*>/)
-            _buffer = _buffer[gtMatch[0].length...]
-            _state  = STATE_START
-            continue
-          else
-            return
+    context.appendChars data
+    while context.charsAvailable() >= 2
+      [ch1, ch2] = context.buffer[context.offset...context.offset+2]
+      context.next = context.next(ch1, ch2)
+      context.consume(1)
 
   # When stream ends or errors, pass the event along
-  stream.on 'end', -> handler.emit('end')
-  stream.on 'error', (error) -> handler.emit('error', error)
+  stream.on 'end', ->
+    context.endInput()
+    while context.charsAvailable() >= 1
+      [ch1, ch2] = context.buffer[context.offset...context.offset+2]
+      context.next = context.next(ch1, ch2)
+      context.consume(1)
+    assert.ok context.next in [parseStart, parseText], "Unexpected end state #{context.next._name}"
 
-# Assuming that text is the beginning of an attribute (e.g. blahblah="somevalue")
-# Try to parse out an attribute and...
-# (1) If successful, add attribute to attrs and return the remaining text
-# (2) If attribute isn't complete (e.g. blahblah="some ), return undefined
-# (3) If text is malformed (e.g. blahblah=> ), throw an error
-_parseAttribute = (text, attrs) ->
-
-  match = text.match ATTR_RE
-
-  if match?
-    name = match[1]
-    value = match[2]
-    # Error checks for quick fail
-    # I wonder if you would go about proving correctness...
-    if name.search(/[= ]/) isnt -1
-      throw new Error "Parser error: expected attribute but got '#{text}'"
-    attrs[name] = value
-    return text[match[0].length...]
-
-  else
-    return undefined
+  stream.on 'error', (error) -> handler.on('error', error)
