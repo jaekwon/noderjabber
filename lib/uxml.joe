@@ -184,7 +184,7 @@ parseAttrValue._name = 'parseAttrValue'
   context = new Context(handler)
 
   # Streams should support utf8 only.
-  stream.setEncoding('utf8')
+  stream.setEncoding?('utf8')
 
   # When data is received, parse it.
   stream.on 'data', (data) ->

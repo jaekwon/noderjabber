@@ -5,7 +5,8 @@
   "author": "Jae Kwon <jkwon.work@gmail.com>",
   "repository": {"type": "git", "url": "git://github.com/jaekwon/NoderJabber.git"},
   "dependencies": {
-      "async": ""
+      "async": "",
+      "cardamom": ""
   },
   "keywords": [],
   "engines": {"node": ">= 0.8.2"},
